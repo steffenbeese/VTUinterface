@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import pyvista as pv
 from vtk import *
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
@@ -15,7 +16,9 @@ class VTUIO(object):
         self.reader.SetFileName(self.filename)
         self.reader.Update()
         self.output = self.reader.GetOutput()
+        #print("self.output: {}".format(self.output))
         self.pdata = self.output.GetPointData()
+        #print("pdata: {}".format(self.pdata))
         self.points = vtk_to_numpy(self.output.GetPoints().GetData())
         self.dim = dim
         if self.dim == 2:
@@ -121,6 +124,38 @@ class PVDIO(object):
                 self.timesteps.append(float(dataset.attrib['timestep']))
                 self.vtufilenames.append(dataset.attrib['file'])
 
+    def readTimeSeriesSbe(self,fieldname, pts = {'pt0': (0.0,0.0,0.0)}):
+        resp_t = {}
+        ptsarray = pd.DataFrame(pts).T.values
+        for pt in pts:
+            if type(fieldname) is str:
+                resp_t[pt] = []
+            elif type(fieldname) is list:
+                resp_t[pt] = {}
+                for field in fieldname:
+                    resp_t[pt][field] = []
+        pc=pv.PolyData(ptsarray)
+        #print('pointarray: {}'.format(ptsarray))
+        for i, filename in enumerate(self.vtufilenames):
+            try:
+                mesh=pv.read(os.path.join(self.folder,filename))
+                interpolated = pc.interpolate(mesh)
+
+                if type(fieldname) is str:
+                      for j,pt in enumerate(pts):
+                            #print("interpolated {} at {}: {}".format(fieldname,pt,interpolated[fieldname]))
+                            resp_t[pt].append(interpolated[fieldname][j])       
+                elif type(fieldname) is list:
+                    data = {}
+                    for field in fieldname:
+                        data[field] = interpolated[fieldname]
+                    for j,pt in enumerate(pts):
+                        for field in fieldname:
+                            resp_t[pt][field].append(data[field][j])
+            except:
+                continue
+        return resp_t
+                
     def readTimeSeries(self,fieldname, pts = {'pt0': (0.0,0.0,0.0)}):
         resp_t = {}
         for pt in pts:
@@ -180,6 +215,48 @@ class PVDIO(object):
                 field = field1 + fieldslope * (timestep-timestep1)
         return field
 
+    def readPointSetDataSbe(self, timestep, fieldname, pointa,pointb,resolution=100):
+        filename = None
+        for i, ts in enumerate(self.timesteps):
+            if timestep == ts:
+                filename = self.vtufilenames[i]
+        if not filename is None:
+            mesh=pv.read(os.path.join(self.folder,filename))
+            sampled = pv.DataSetFilters.sample_over_line(mesh,pointa, pointb, resolution)
+            field = sampled.get_array(fieldname)
+            distance = sampled['Distance']
+        else:
+            filename1 = None
+            filename2 = None
+            timestep1 = 0.0
+            timestep2 = 0.0
+            for i, ts in enumerate(self.timesteps):
+                try:
+                    if (timestep > ts) and (timestep < self.timesteps[i+1]):
+                        timestep1 = ts
+                        timestep2 = self.timesteps[i+1]
+                        filename1 = self.vtufilenames[i]
+                        filename2 = self.vtufilenames[i+1]
+                except IndexError:
+                    print("time step is out of range")
+            if (filename1 is None) or (filename2 is None):
+                print("time step is out of range")
+            else:
+                #print("filename 1: {}".format(filename1))
+                #print("filename 2: {}".format(filename2))
+                #print("dim {}".format(self.dim))
+                mesh1 = pv.read(os.path.join(self.folder,filename1))
+                sampled1 = pv.DataSetFilters.sample_over_line(mesh1,pointa, pointb, resolution)
+                mesh2 = pv.read(os.path.join(self.folder,filename2))
+                sampled2 = pv.DataSetFilters.sample_over_line(mesh2,pointa, pointb, resolution)
+                field1 = sampled1.get_array(fieldname)
+                field2 = sampled2.get_array(fieldname)
+                fieldslope = (field2-field1)/(timestep2-timestep1)
+                field = field1 + fieldslope * (timestep-timestep1)
+                distance = sampled1['Distance']
+        return (field,distance)
+
+    
     def readPointSetData(self, timestep, fieldname, pointsetarray =[(0,0,0)]):
         filename = None
         for i, ts in enumerate(self.timesteps):
