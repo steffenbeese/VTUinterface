@@ -121,7 +121,16 @@ class PVDIO(object):
         root = tree.getroot()
         for collection in root.getchildren():
             for dataset in collection.getchildren():
-                self.timesteps.append(float(dataset.attrib['timestep']))
+                try:
+                    self.timesteps.append(float(dataset.attrib['timestep']))
+                except:
+                    ts = dataset.attrib['timestep'].lower().rstrip().lstrip()
+                    if ts.endswith('e'):
+                        ts+="0"
+                        self.timesteps.append(float(ts))
+                    else:
+                        print("Could not convert timestep to float")
+                        exit()
                 self.vtufilenames.append(dataset.attrib['file'])
 
     def readTimeSeriesSbe(self,fieldname, pts = {'pt0': (0.0,0.0,0.0)}):
@@ -139,8 +148,9 @@ class PVDIO(object):
         for i, filename in enumerate(self.vtufilenames):
             try:
                 mesh=pv.read(os.path.join(self.folder,filename))
+                if(fieldname in mesh.cell_arrays.keys()):
+                    mesh=mesh.cell_data_to_point_data()
                 interpolated = pc.interpolate(mesh)
-
                 if type(fieldname) is str:
                       for j,pt in enumerate(pts):
                             #print("interpolated {} at {}: {}".format(fieldname,pt,interpolated[fieldname]))
@@ -153,6 +163,7 @@ class PVDIO(object):
                         for field in fieldname:
                             resp_t[pt][field].append(data[field][j])
             except:
+                print('Could not read field data')
                 continue
         return resp_t
                 
@@ -238,7 +249,7 @@ class PVDIO(object):
                         filename1 = self.vtufilenames[i]
                         filename2 = self.vtufilenames[i+1]
                 except IndexError:
-                    print("time step is out of range")
+                    print("time step is out of range:{}, {}".format(i,ts))
             if (filename1 is None) or (filename2 is None):
                 print("time step is out of range")
             else:
